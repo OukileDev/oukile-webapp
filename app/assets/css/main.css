@@ -11,9 +11,3 @@ main {
   height: calc(100vh - var(--navbar-height));
   overflow: hidden;
 }
-
-/* Propagation de la hauteur jusqu'aux pages et leurs enfants directs */
-main > div,
-main > div > * {
-  height: 100%;
-}

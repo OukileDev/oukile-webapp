@@ -1,5 +1,5 @@
 <template>
-  <nav class="navbar fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 dark:bg-gray-900 dark:border-gray-800">
+  <nav class="navbar fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 dark:bg-gray-900 dark:border-gray-800" style="z-index:10060;">
     <ul class="nav-list mx-auto max-w-xl flex justify-between px-4 py-2">
       <li v-for="(item, index) in items" :key="item.name" class="flex-1">
         <button
