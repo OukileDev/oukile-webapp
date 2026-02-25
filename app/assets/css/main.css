@@ -1,0 +1,19 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+/* Hauteur de la navbar fixe */
+:root {
+  --navbar-height: 64px;
+}
+
+/* Le contenu principal ne dépasse jamais au-dessus de la navbar */
+main {
+  height: calc(100vh - var(--navbar-height));
+  overflow: hidden;
+}
+
+/* Propagation de la hauteur jusqu'aux pages et leurs enfants directs */
+main > div,
+main > div > * {
+  height: 100%;
+}
