@@ -1,0 +1,60 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+  previewFeatures = ["views"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model calendar_dates {
+  service_id     String   @db.VarChar(200)
+  date           DateTime @db.Date
+  exception_type Int      @db.SmallInt
+
+  @@id([service_id, date])
+}
+
+model routes {
+  route_id         String  @id @db.VarChar(100)
+  route_short_name String? @db.VarChar(50)
+  route_long_name  String? @db.VarChar(300)
+  route_type       Int     @db.SmallInt
+  route_color      String? @db.Char(6)
+  route_text_color String? @db.Char(6)
+  trips            trips[]
+}
+
+view stop_times_compatible {
+  trip_id               String
+  stop_sequence         Int
+  stop_id               String
+  crossing_time_seconds Int
+  crossing_time_text    String
+
+  // Relations opposées (Correction n°3)
+  trip                  trips @relation(fields: [trip_id], references: [trip_id])
+  stop                  stops @relation(fields: [stop_id], references: [stop_id])
+
+  @@unique([trip_id, stop_sequence]) // <-- Correction n°2 (unique au lieu de id)
+}
+
+model stops {
+  stop_id    String                  @id @db.VarChar(100)
+  stop_name  String                  @db.VarChar(200)
+  stop_lat   Float
+  stop_lon   Float
+  stop_times stop_times_compatible[]
+}
+
+model trips {
+  trip_id       String                  @id @db.VarChar(100)
+  route_id      String                  @db.VarChar(100)
+  service_id    String                  @db.VarChar(200)
+  trip_headsign String?                 @db.VarChar(200)
+  direction_id  Int?                    @db.SmallInt
+  shape_id      String?                 @db.VarChar(100)
+  stop_times    stop_times_compatible[]
+  routes        routes                  @relation(fields: [route_id], references: [route_id], onDelete: NoAction, onUpdate: NoAction)
+}
