@@ -16,11 +16,14 @@
     "@prisma/adapter-pg": "^7.4.1",
     "@prisma/client": "^7.4.1",
     "leaflet": "^1.9.4",
+    "leaflet.markercluster": "^1.5.3",
     "nuxt": "^4.3.1",
     "pg": "^8.18.0",
     "tailwindcss": "^4.2.1",
     "vue": "^3.5.28",
-    "vue-router": "^4.6.4"
+    "vue-router": "^4.6.4",
+    "ioredis": "^5.9.3",
+    "socket.io-client": "^4.7.2"
   },
   "devDependencies": {
     "@types/pg": "^8.16.0",

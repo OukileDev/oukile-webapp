@@ -6,10 +6,22 @@ export default defineNuxtConfig({
 
   // Configuration CSS
   css: [
+    'leaflet/dist/leaflet.css',
+    'leaflet.markercluster/dist/MarkerCluster.css',
+    'leaflet.markercluster/dist/MarkerCluster.Default.css',
     '~/assets/css/main.css'
   ],
 
+  leaflet: {
+    markerCluster: true
+  },
+
   // Configuration de la vue d'ensemble
+  runtimeConfig: {
+    public: {
+      LOCATE_WS_URL: process.env.NUXT_PUBLIC_LOCATE_WS_URL || ''
+    }
+  },
   app: {
     head: {
       viewport: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover',
