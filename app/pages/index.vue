@@ -106,6 +106,53 @@
     }
     return currentDirection.value
   })
+
+  // bottom dynamique en fonction de la hauteur réelle de la navbar
+  const followBottom = ref<string>(`calc(env(safe-area-inset-bottom) + 76px)`)
+
+  function updateFollowBottom() {
+    try {
+      const nav = document.querySelector('.navbar') as HTMLElement | null
+      const extra = 16
+      if (nav) {
+        const rect = nav.getBoundingClientRect()
+        const distanceFromBottom = Math.max(0, window.innerHeight - rect.top)
+        let px = Math.ceil(distanceFromBottom + extra)
+        const maxPx = Math.round(window.innerHeight * 0.4)
+        const minPx = 12
+        if (px < minPx) px = minPx
+        if (px > maxPx) px = maxPx
+        followBottom.value = `${px}px`
+      } else {
+        followBottom.value = `calc(env(safe-area-inset-bottom) + 76px)`
+      }
+    } catch (e) {
+      followBottom.value = `calc(env(safe-area-inset-bottom) + 76px)`
+    }
+  }
+
+  if (process.client) {
+    onMounted(() => {
+      updateFollowBottom()
+      window.addEventListener('resize', updateFollowBottom)
+
+      const nav = document.querySelector('.navbar') as HTMLElement | null
+      if (nav && typeof MutationObserver !== 'undefined') {
+        const mo = new MutationObserver(() => updateFollowBottom())
+        mo.observe(nav, { attributes: true, childList: true, subtree: true })
+        ;(nav as any).__followMo = mo
+      }
+    })
+
+    onBeforeUnmount(() => {
+      window.removeEventListener('resize', updateFollowBottom)
+      const nav = document.querySelector('.navbar') as HTMLElement | null
+      if (nav && (nav as any).__followMo) {
+        try { (nav as any).__followMo.disconnect() } catch (e) {}
+        ;(nav as any).__followMo = null
+      }
+    })
+  }
 </script>
 
 <template>
@@ -134,16 +181,16 @@
   </div>
 
   <!-- Barre de suivi en bas -->
-  <div v-if="followActive && selectedLine && currentDirection" class="fixed left-4 right-4" style="bottom: calc(env(safe-area-inset-bottom) + 80px); z-index: 10050; pointer-events: auto;">
+  <div v-if="followActive && selectedLine && currentDirection" class="fixed left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-md" :style="{ bottom: followBottom, zIndex: 10050, pointerEvents: 'auto' }">
     <div class="bg-white/90 dark:bg-slate-800 rounded-xl shadow p-3 flex items-center justify-between" style="position:relative; z-index:10051;">
       <div class="flex flex-col">
         <div class="text-sm font-semibold">Suivi de la ligne {{ selectedLine }}</div>
         <div class="text-xs text-gray-600 dark:text-gray-300">Direction {{ displayDirectionLabel }}</div>
       </div>
 
-      <div class="flex items-center gap-2">
-        <button @click="reverseDirection" class="px-3 py-1 bg-blue-600 text-white rounded">Inverser</button>
-        <button @click="stopFollow" class="px-3 py-1 border rounded">Arrêter</button>
+      <div class="flex items-center gap-5 pt-1">
+        <button @click="reverseDirection"><Icon name="mi:switch" class="h-6 w-6"/></button>
+        <button @click="stopFollow" class=""><Icon name="mi:close" class="h-6 w-6"/></button> 
       </div>
     </div>
   </div>

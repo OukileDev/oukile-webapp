@@ -6,8 +6,11 @@
   --navbar-height: 64px;
 }
 
-/* Le contenu principal ne dépasse jamais au-dessus de la navbar */
 main {
   height: calc(100vh - var(--navbar-height));
   overflow: hidden;
+}
+
+.leaflet-control-container {
+  display: none;
 }

@@ -13,7 +13,7 @@
       Lignes de bus
     </h1>
     
-    <div class="flex-1 overflow-y-auto pb-20 pr-1 scrollbar-hide">
+    <div class="flex-1 overflow-y-auto pb-20 pr-1 scrollbar-hide overflow-x-hidden">
       <div class="flex flex-col gap-3">
         <div 
           v-for="line in lines" 
