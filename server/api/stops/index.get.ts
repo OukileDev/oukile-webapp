@@ -1,9 +1,8 @@
-export default defineEventHandler(async (event) => {
+export default defineEventHandler(async () => {
   try {
-    const stops = await prisma.stops.findMany()
-    return stops
-  } catch (error) {
-    console.error('Error fetching bus stops:', error)
+    return await prisma.stops.findMany()
+  } catch (e) {
+    console.error('[oukile] failed to fetch stops', e)
     throw createError({ statusCode: 500, message: 'Failed to fetch bus stops' })
   }
 })
