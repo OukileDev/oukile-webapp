@@ -210,12 +210,28 @@ const onMapReady = async (maybeMap?: any) => {
     return m
   }
 
+  // Retire tous les markers de ligne de la carte et nettoie les sets/pool
+  function clearLineMarkers() {
+    for (const key of Array.from(addedLine)) {
+      try { lineLayer.removeLayer(markerPool.get(key)) } catch {}
+      markerPool.delete(key)
+    }
+    addedLine.clear()
+    try { lineLayer.clearLayers() } catch {}
+  }
+
   function updateVisibleMarkers() {
     try {
       if (!leafletMap) return;
       const bounds = leafletMap.getBounds();
       const extended = bounds.pad(PRELOAD_PAD);
       const lineFilter = lineStopIds.value;
+
+      // Si on repasse en mode normal (plus de filtre ligne), on nettoie
+      // tous les markers de ligne d'un coup sans passer par safeRemove
+      if (lineFilter === null && addedLine.size > 0) {
+        clearLineMarkers()
+      }
 
       for (const loc of locations.value) {
         if (typeof loc.lat !== 'number' || typeof loc.lng !== 'number') continue;
