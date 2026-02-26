@@ -12,8 +12,6 @@ const {
   stopFollow,
 } = useLineFollow()
 
-const { followedBus, followBus, stopFollowing } = useSocket()
-
 // ── Chargement initial depuis la query ────────────────────────────────────
 const initialLine = route.query.line as string | undefined
 if (initialLine) {
@@ -85,9 +83,6 @@ if (import.meta.client) {
   >
     <BusAttributionPanel
       :bus-list="attributions[selectedLine] ?? []"
-      :followed-bus="followedBus"
-      @follow-bus="followBus"
-      @stop-following="stopFollowing"
     />
   </LineFollowBar>
 </template>

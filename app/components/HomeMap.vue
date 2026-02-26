@@ -17,10 +17,59 @@ const {
   lineStopIds,
   attributions,
   onRefreshMarkers,
+  stopFollow,
 } = useLineFollow()
 
 const { followedBus, followBus, stopFollowing, unsubscribeAllBuses } = useSocket()
+
+// ── Arrêt complet du suivi (bus + ligne) ─────────────────────────────────
+// stopFollow() dans useLineFollow fait déjà resetFollow() + unsubscribeAllBuses()
+function fullStop() {
+  try { stopFollow() } catch {}
+  try { stopFollowing() } catch {}
+}
+
+// Clic sur la navbar → stop tout
+function handleNavbarClick() {
+  fullStop()
+}
+
+// Quitter la page (navigation) → stop tout + cleanup Leaflet
+onBeforeUnmount(() => {
+  fullStop()
+  leafletCleanup()
+  const nav = document.querySelector('.navbar')
+  if (nav) nav.removeEventListener('click', handleNavbarClick)
+})
+
+onMounted(() => {
+  const nav = document.querySelector('.navbar')
+  if (nav) nav.addEventListener('click', handleNavbarClick)
+})
+
 const { locations, loadStops } = useStops()
+
+// ── Références Leaflet accessibles au niveau racine pour le cleanup ────────
+let _leafletMap: any = null
+let _cluster: any = null
+let _lineLayer: any = null
+let _vehicleLayer: any = null
+let _geojsonLayer: any = null
+let _updateVisibleMarkers: (() => void) | null = null
+let _onBusLocationEvent: ((e: Event) => void) | null = null
+
+// Cleanup Leaflet complet (appelé à l'unmount)
+function leafletCleanup() {
+  try { _leafletMap?.off('moveend zoomend', _updateVisibleMarkers) } catch {}
+  try { _leafletMap?.removeLayer(_cluster) } catch {}
+  try { _leafletMap?.removeLayer(_lineLayer) } catch {}
+  try { _leafletMap?.removeLayer(_vehicleLayer) } catch {}
+  try { if (_geojsonLayer) _leafletMap?.removeLayer(_geojsonLayer) } catch {}
+  if (_onBusLocationEvent) window.removeEventListener('oukile:bus-location', _onBusLocationEvent)
+  onRefreshMarkers.value = null
+  _leafletMap = _cluster = _lineLayer = _vehicleLayer = _geojsonLayer = null
+  _updateVisibleMarkers = _onBusLocationEvent = null
+}
 
 const onMapReady = async (maybeMap?: any) => {
   // @ts-ignore
@@ -44,21 +93,23 @@ const onMapReady = async (maybeMap?: any) => {
     L.latLng(47.28, 2.8)
   )
 
-  // Récupère l'instance Leaflet réelle
-  let leafletMap: any = null
+  // Récupère l'instance Leaflet réelle et la stocke au niveau racine
   if (maybeMap && typeof maybeMap.getZoom === 'function') {
-    leafletMap = maybeMap
+    _leafletMap = maybeMap
   } else if (maybeMap && (maybeMap.mapObject || maybeMap._map || maybeMap.map)) {
-    leafletMap = maybeMap.mapObject || maybeMap._map || maybeMap.map
+    _leafletMap = maybeMap.mapObject || maybeMap._map || maybeMap.map
   } else {
     const mc = mapRef.value
-    leafletMap = mc?.mapObject || mc?._map || mc?.map
+    _leafletMap = mc?.mapObject || mc?._map || mc?.map
   }
 
-  if (!leafletMap) {
+  if (!_leafletMap) {
     console.warn('[oukile] Leaflet instance not found on map ref')
     return
   }
+
+  // Alias local pour lisibilité dans la suite de onMapReady
+  const leafletMap = _leafletMap
 
   // Limites et zoom
   try {
@@ -73,17 +124,20 @@ const onMapReady = async (maybeMap?: any) => {
   await loadStops()
 
   // ── Couches ──────────────────────────────────────────────────────────────
-  const cluster = (L as any).markerClusterGroup({
+  _cluster = (L as any).markerClusterGroup({
     maxClusterRadius: 36,
     spiderfyOnMaxZoom: true,
     disableClusteringAtZoom: 14,
     chunkedLoading: true,
     showCoverageOnHover: false,
   })
-  if (!cluster) { console.error('[oukile] markerClusterGroup not available'); return }
+  if (!_cluster) { console.error('[oukile] markerClusterGroup not available'); return }
+  const cluster = _cluster
 
-  const lineLayer = L.layerGroup()
-  const vehicleLayer = L.layerGroup()
+  _lineLayer = L.layerGroup()
+  const lineLayer = _lineLayer
+  _vehicleLayer = L.layerGroup()
+  const vehicleLayer = _vehicleLayer
   const busMarkers = new Map<string, any>()
 
   // Helpers sûrs pour retirer un marker d'un layer : certains markers
@@ -92,8 +146,7 @@ const onMapReady = async (maybeMap?: any) => {
   function safeRemoveFromCluster(marker: any) {
     if (!marker) return
     try {
-      const el = marker._icon ?? (marker.getElement ? marker.getElement() : null)
-      if (!el && typeof marker._radius === 'undefined') return
+      if (typeof marker._icon === 'undefined' && typeof marker._radius === 'undefined' && !(marker.getElement && marker.getElement())) return
       cluster.removeLayer(marker)
     } catch {}
   }
@@ -101,9 +154,7 @@ const onMapReady = async (maybeMap?: any) => {
   function safeRemoveFromLineLayer(marker: any) {
     if (!marker) return
     try {
-      const el = marker._icon ?? (marker.getElement ? marker.getElement() : null)
-      // circleMarker n'expose pas forcément _icon mais a _radius / _renderer
-      if (!el && typeof marker._radius === 'undefined') return
+      if (typeof marker._icon === 'undefined' && typeof marker._radius === 'undefined' && !(marker.getElement && marker.getElement())) return
       lineLayer.removeLayer(marker)
     } catch {}
   }
@@ -258,6 +309,7 @@ const onMapReady = async (maybeMap?: any) => {
     }
   }
 
+  _updateVisibleMarkers = updateVisibleMarkers
   updateVisibleMarkers()
   leafletMap.on('moveend zoomend', updateVisibleMarkers)
   onRefreshMarkers.value = updateVisibleMarkers
@@ -266,19 +318,17 @@ const onMapReady = async (maybeMap?: any) => {
   leafletMap.addLayer(vehicleLayer)
 
   // ── Tracé GeoJSON ─────────────────────────────────────────────────────────
-  let geojsonLayer: any = null
-
   function redrawGeojson() {
-    if (geojsonLayer) { try { leafletMap.removeLayer(geojsonLayer) } catch {}; geojsonLayer = null }
+    if (_geojsonLayer) { try { leafletMap.removeLayer(_geojsonLayer) } catch {}; _geojsonLayer = null }
     try { leafletMap.removeLayer(lineLayer) } catch {}
 
     const gj = filteredGeojson.value
     if (!gj) { leafletMap.addLayer(lineLayer); return }
 
-    geojsonLayer = (L as any).geoJSON(gj, {
+    _geojsonLayer = (L as any).geoJSON(gj, {
       style: { color: lineColor.value, weight: 4, opacity: 0.85 },
     })
-    geojsonLayer.addTo(leafletMap)
+    _geojsonLayer.addTo(leafletMap)
     leafletMap.addLayer(lineLayer)
   }
 
@@ -288,7 +338,14 @@ const onMapReady = async (maybeMap?: any) => {
       if (m && typeof m.setStyle === 'function') m.setStyle({ fillColor: lineColor.value })
     }
     redrawGeojson()
-  }, { immediate: true })
+  })
+
+  // Dessin initial : si une ligne était déjà chargée avant que la carte soit prête
+  // (ex : URL ?line=X), on force le rendu du GeoJSON et des markers de ligne.
+  redrawGeojson()
+  if (selectedLine.value) {
+    updateVisibleMarkers()
+  }
 
   // ── Événements de position bus ────────────────────────────────────────────
   function onBusLocationEvent(e: Event) {
@@ -318,6 +375,7 @@ const onMapReady = async (maybeMap?: any) => {
     }
   }
 
+  _onBusLocationEvent = onBusLocationEvent
   window.addEventListener('oukile:bus-location', onBusLocationEvent)
 
   // Nettoyage markers quand la ligne change
@@ -341,16 +399,7 @@ const onMapReady = async (maybeMap?: any) => {
     }
   })
 
-  // ── Cleanup ───────────────────────────────────────────────────────────────
-  onBeforeUnmount(() => {
-    try { leafletMap.off('moveend zoomend', updateVisibleMarkers) } catch {}
-    try { leafletMap.removeLayer(cluster) } catch {}
-    try { leafletMap.removeLayer(lineLayer) } catch {}
-    try { leafletMap.removeLayer(vehicleLayer) } catch {}
-    if (geojsonLayer) try { leafletMap.removeLayer(geojsonLayer) } catch {}
-    window.removeEventListener('oukile:bus-location', onBusLocationEvent)
-    onRefreshMarkers.value = null
-  })
+  // Le cleanup Leaflet est géré par leafletCleanup() dans le onBeforeUnmount racine
 }
 </script>
 

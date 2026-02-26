@@ -7,6 +7,9 @@ import type { Socket } from 'socket.io-client'
 
 let socket: Socket | null = null
 const joinedRooms = new Set<string>()
+// Compteur de génération : incrémenté à chaque unsubscribeAllBuses pour annuler
+// les abonnements async en cours qui se résoudraient trop tard.
+let subscribeGeneration = 0
 
 export function useSocket() {
   const runtimeConfig = useRuntimeConfig()
@@ -77,9 +80,6 @@ export function useSocket() {
 
   async function followBus(busID: string) {
     try {
-      // Log détaillé pour debug
-      console.log('[oukile][DEBUG] followBus appelé avec busID =', busID)
-      console.log('[oukile][DEBUG] Stack trace:', new Error().stack)
       const s = await ensureSocket()
       if (s && !joinedRooms.has(busID)) {
         s.emit('join', `bus:${busID}`)
@@ -97,7 +97,7 @@ export function useSocket() {
 
   function stopFollowing() {
     if (socket && followedBus.value) {
-      try { socket.emit('leave', `bus:${followedBus.value}`) } catch {}
+      try { socket.emit('leave_bus', followedBus.value) } catch {}
       joinedRooms.delete(followedBus.value)
     }
     followedBus.value = null
@@ -105,7 +105,10 @@ export function useSocket() {
 
   async function subscribeBusesForLine(busList: string[]) {
     if (!busList.length) return
+    const gen = subscribeGeneration
     const s = await ensureSocket()
+    // Si unsubscribeAllBuses a été appelé pendant l'await, on annule
+    if (gen !== subscribeGeneration) return
     if (!s) return
     for (const bus of busList) {
       if (!joinedRooms.has(bus)) {
@@ -120,20 +123,16 @@ export function useSocket() {
   }
 
   function unsubscribeAllBuses() {
+    subscribeGeneration++ // invalide tous les subscribeBusesForLine en cours
     if (!socket) {
       joinedRooms.clear()
       return
     }
     for (const bus of Array.from(joinedRooms)) {
-      try {
-        socket.emit('leave', `bus:${bus}`)
-        socket.emit('leave_bus', bus)
-        socket.emit('unsubscribe', `bus:${bus}`)
-        socket.emit('unsubscribe_bus', bus)
-        socket.emit('leaveRoom', `bus:${bus}`)
-      } catch {}
+      try { socket.emit('leave_bus', bus) } catch {}
     }
     joinedRooms.clear()
+    console.log('[oukile] unsubscribed all buses')
   }
 
   function disconnectSocket() {
