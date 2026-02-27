@@ -20,11 +20,7 @@ ENV NODE_ENV=production
 
 WORKDIR /app
 
-# Installer uniquement les dépendances de production
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-
-# Copier le .output (dossier généré par Nuxt) depuis l'étape builder
+# Nuxt bundle tout dans .output — pas besoin de réinstaller les dépendances
 COPY --from=builder /app/.output ./.output
 
 # Exposer le port 3000 (Nuxt par défaut)
