@@ -6,8 +6,10 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Copier les manifestes et installer TOUTES les dépendances (dev incluses)
+# npm install plutôt que npm ci : évite les erreurs de désync du lockfile
+# entre versions de npm (lockfileVersion)
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm install
 
 # Copier les sources et faire le postinstall + build
 COPY . .
