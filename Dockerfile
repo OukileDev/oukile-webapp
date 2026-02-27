@@ -11,9 +11,14 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm install
 
-    # Copier les sources et faire le postinstall + build
+# Copier les sources
 COPY . .
-RUN npx prisma generate && npm run postinstall && npm run build# ── Étape 2 : Image de production ──────────────────────────────────────
+
+# Générer le client Prisma (app/generated/prisma/ est dans .gitignore)
+# puis préparer Nuxt et builder
+RUN npx prisma generate && npm run postinstall && npm run build
+
+# ── Étape 2 : Image de production ──────────────────────────────────────
 FROM node:22-alpine
 
 ENV NODE_ENV=production
