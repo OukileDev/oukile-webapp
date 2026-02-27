@@ -11,11 +11,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm install
 
-# Copier les sources et faire le postinstall + build
+    # Copier les sources et faire le postinstall + build
 COPY . .
-RUN npm run postinstall && npm run build
-
-# ── Étape 2 : Image de production ──────────────────────────────────────
+RUN npx prisma generate && npm run postinstall && npm run build# ── Étape 2 : Image de production ──────────────────────────────────────
 FROM node:22-alpine
 
 ENV NODE_ENV=production
