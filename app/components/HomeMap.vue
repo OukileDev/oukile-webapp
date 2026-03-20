@@ -80,14 +80,6 @@ const onMapReady = async (maybeMap?: any) => {
     return
   }
 
-  // Import dynamique de leaflet.markercluster — étend L avec L.markerClusterGroup
-  try {
-    await import('leaflet.markercluster')
-  } catch (e) {
-    console.error('[oukile] Failed to load leaflet.markercluster:', e)
-    return
-  }
-
   const BOURGES_BOUNDS = L.latLngBounds(
     L.latLng(46.88, 2.0),
     L.latLng(47.28, 2.8)
