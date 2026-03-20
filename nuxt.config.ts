@@ -12,10 +12,6 @@ export default defineNuxtConfig({
     '~/assets/css/main.css'
   ],
 
-  leaflet: {
-    markerCluster: true
-  },
-
   // Configuration de la vue d'ensemble
   runtimeConfig: {
     public: {

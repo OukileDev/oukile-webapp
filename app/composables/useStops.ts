@@ -17,7 +17,7 @@ export function useStops() {
       id: s.stop_id,
       name: s.stop_name,
       lat: s.stop_lat,
-      lng: (s as any).stop_lon ?? (s as any).stop_long ?? 0
+      lng: s.stop_lon
     }))
   )
 
