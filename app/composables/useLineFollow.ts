@@ -38,6 +38,27 @@ export function useLineFollow() {
   // Callback pour déclencher un refresh des marqueurs depuis onMapReady
   const onRefreshMarkers = useState<(() => void) | null>('onRefreshMarkers', () => null)
 
+  // Headsign GTFS du sens courant.
+  // Priorité : propriétés GeoJSON → direction_name de la DB (network table).
+  // Les shapes GeoJSON n'incluent généralement pas trip_headsign, d'où le fallback DB.
+  const currentHeadsign = computed<string | null>(() => {
+    if (!currentDirection.value) return null
+    // 1. Propriétés GeoJSON (si le fichier les inclut)
+    const feats = directionMap.value[currentDirection.value] ?? []
+    if (feats.length) {
+      const p: any = (feats[0] as any).properties || {}
+      const h = p.trip_headsign ?? p.headsign ?? null
+      if (h) return h
+    }
+    // 2. Fallback : direction_name depuis la DB (même valeur que trip_headsign dans GTFS)
+    if (lineStopsData.value) {
+      const idx = directionKeys.value.indexOf(currentDirection.value)
+      if (idx === 0) return lineStopsData.value.direction_name_1 ?? null
+      if (idx === 1) return lineStopsData.value.direction_name_2 ?? null
+    }
+    return null
+  })
+
   const filteredGeojson = computed<GeoJSON.GeoJsonObject | null>(() => {
     if (!geojsonData.value) return null
     const data = geojsonData.value as any
@@ -92,6 +113,16 @@ export function useLineFollow() {
     }
   }
 
+  async function fetchAndSubscribeAttributions(lineName: string, headsign?: string | null) {
+    const url = headsign
+      ? `/api/attributions/${encodeURIComponent(lineName)}?headsign=${encodeURIComponent(headsign)}`
+      : `/api/attributions/${encodeURIComponent(lineName)}`
+    const buses = (await $fetch<string[]>(url)) || []
+    attributions.value = { [lineName]: buses }
+    unsubscribeAllBuses()
+    await subscribeBusesForLine(buses)
+  }
+
   async function loadLineShape(lineName: string) {
     try {
       const [data, lineData] = await Promise.all([
@@ -127,15 +158,9 @@ export function useLineFollow() {
       currentDirection.value = directionKeys.value[0] ?? null
       applyLineStopFilter()
 
-      // Attributions et abonnement socket
+      // Attributions et abonnement socket (filtrés par direction dès le départ)
       try {
-        const attrib = await $fetch(`/api/attributions/${encodeURIComponent(lineName)}`)
-        attributions.value = { [lineName]: (attrib as any) || [] }
-        unsubscribeAllBuses()
-        
-        // CORRECTION : On envoie le tableau de bus de la ligne spécifique, pas l'objet entier
-  await subscribeBusesForLine(attributions.value[lineName] || [])
-        
+        await fetchAndSubscribeAttributions(lineName, currentHeadsign.value)
       } catch (e) {
         console.error('[oukile] failed to load attributions for line', lineName, e)
       }
@@ -145,12 +170,19 @@ export function useLineFollow() {
     }
   }
 
-  function reverseDirection() {
+  async function reverseDirection() {
     if (directionKeys.value.length < 2) return
     const idx = directionKeys.value.indexOf(currentDirection.value ?? '')
     const next = directionKeys.value[(idx + 1) % directionKeys.value.length] ?? directionKeys.value[0]
     currentDirection.value = next ?? null
     applyLineStopFilter()
+    if (selectedLine.value) {
+      try {
+        await fetchAndSubscribeAttributions(selectedLine.value, currentHeadsign.value)
+      } catch (e) {
+        console.error('[oukile] failed to update attributions on direction change', e)
+      }
+    }
   }
 
   function resetFollow() {
@@ -186,6 +218,7 @@ export function useLineFollow() {
     // computed
     filteredGeojson,
     displayDirectionLabel,
+    currentHeadsign,
     // actions
     loadLineShape,
     reverseDirection,

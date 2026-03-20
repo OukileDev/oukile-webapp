@@ -149,18 +149,36 @@ const onMapReady = async (maybeMap?: any) => {
   }
 
   // ── Helpers markers bus ───────────────────────────────────────────────────
-  function addOrUpdateBusMarker(busID: string, lat: number, lng: number, popup: string) {
+  function addOrUpdateBusMarker(busID: string, lat: number, lng: number) {
     if (typeof lat !== 'number' || typeof lng !== 'number') return
     const existing = busMarkers.get(busID)
     if (existing) {
       try {
         existing.setLatLng([lat, lng])
-        existing.getPopup()?.setContent(popup)
       } catch (e) { console.error('[oukile] update marker error', e) }
     } else {
       try {
         const m = L.marker([lat, lng], { riseOnHover: true })
-        m.bindPopup(popup)
+        m.bindPopup(`<strong>${busID}</strong>`)
+        m.on('click', async () => {
+          try {
+            const info = await $fetch<{ route: string | null; headsign: string | null; delay: number | null } | null>(
+              `/api/vehicles/${encodeURIComponent(busID)}`
+            )
+            const headsignLine = info?.headsign ? `<br/>↗ ${info.headsign}` : ''
+            let delayLine = ''
+            if (info?.delay != null) {
+              const absSec = Math.abs(info.delay)
+              const min = Math.floor(absSec / 60)
+              const sec = absSec % 60
+              const duration = min > 0 ? `${min} min${sec > 0 ? ` ${sec} s` : ''}` : `${sec} s`
+              if (info.delay > 10) delayLine = `<br/>🔴 En retard de ${duration}`
+              else if (info.delay < -10) delayLine = `<br/>🟢 En avance de ${duration}`
+              else delayLine = `<br/>🟢 À l'heure`
+            }
+            m.getPopup()?.setContent(`<strong>${busID}</strong>${headsignLine}${delayLine}`)
+          } catch {}
+        })
         vehicleLayer.addLayer(m)
         busMarkers.set(busID, m)
       } catch (e) { console.error('[oukile] create marker error', e) }
@@ -306,7 +324,7 @@ const onMapReady = async (maybeMap?: any) => {
   // ── Événements de position bus ────────────────────────────────────────────
   function onBusLocationEvent(e: Event) {
     try {
-      const { busID, lat, lng, ts } = (e as CustomEvent).detail ?? {}
+      const { busID, lat, lng } = (e as CustomEvent).detail ?? {}
       if (!busID) return
 
       if (!geojsonData.value) {
@@ -319,7 +337,7 @@ const onMapReady = async (maybeMap?: any) => {
         if (!list.includes(busID)) return
       }
 
-      addOrUpdateBusMarker(busID, Number(lat), Number(lng), `<strong>${busID}</strong><br/>${ts ?? ''}`)
+      addOrUpdateBusMarker(busID, Number(lat), Number(lng))
 
       if (followedBus.value === busID) {
         try { leafletMap.panTo([Number(lat), Number(lng)]) } catch {}
@@ -337,6 +355,17 @@ const onMapReady = async (maybeMap?: any) => {
     const allowed = newLine ? (attributions.value?.[newLine] ?? []) : []
     clearBusMarkersNotIn(allowed)
   }))
+
+  // Quand la liste de bus change (ex. changement de direction), on supprime
+  // les marqueurs qui ne font plus partie de la nouvelle liste.
+  _watchers.push(watch(
+    () => selectedLine.value ? (attributions.value?.[selectedLine.value] ?? []) : [],
+    (newList) => {
+      if (!_leafletMap) return
+      clearBusMarkersNotIn(newList)
+    }
+  ))
+
 
   _watchers.push(watch(geojsonData, (val) => {
     if (!_leafletMap) return
