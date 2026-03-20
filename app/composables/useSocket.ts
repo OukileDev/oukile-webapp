@@ -29,20 +29,6 @@ export function useSocket() {
       return null
     }
 
-    // Refuse de connecter si l'URL WS n'a pas de port explicite (évite de taper le serveur Nuxt)
-    try {
-      const u = new URL(base)
-      if ((u.protocol === 'ws:' || u.protocol === 'wss:') && !u.port) {
-        console.error(
-          `[oukile] WS URL '${base}' has no explicit port — refusing. ` +
-          `Set NUXT_PUBLIC_LOCATE_WS_URL to e.g. 'ws://localhost:4000'`
-        )
-        return null
-      }
-    } catch {
-      console.warn('[oukile] invalid NUXT_PUBLIC_LOCATE_WS_URL', base)
-    }
-
     socket = io(base, { transports: ['websocket'] })
     socket.on('connect_error', (err) => console.error('[oukile] socket connect error', err))
     socket.on('connect', () => console.log('[oukile] socket connected', socket?.id))

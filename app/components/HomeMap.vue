@@ -36,8 +36,14 @@ let _vehicleLayer: any = null
 let _geojsonLayer: any = null
 let _updateVisibleMarkers: (() => void) | null = null
 let _onBusLocationEvent: ((e: Event) => void) | null = null
+// Stop-handles des watchers créés dans onMapReady après un await.
+// En Vue 3, watch() après un await n'est pas scopé au composant : il faut
+// les arrêter manuellement pour éviter qu'ils s'exécutent sur une carte détruite.
+const _watchers: (() => void)[] = []
 
 function leafletCleanup() {
+  _watchers.forEach(stop => stop())
+  _watchers.length = 0
   try { _leafletMap?.off('moveend zoomend', _updateVisibleMarkers) } catch {}
   try { _leafletMap?.removeLayer(_cluster) } catch {}
   try { _leafletMap?.removeLayer(_lineLayer) } catch {}
@@ -271,6 +277,7 @@ const onMapReady = async (maybeMap?: any) => {
 
   // ── Tracé GeoJSON ─────────────────────────────────────────────────────────
   function redrawGeojson() {
+    if (!_leafletMap) return
     if (_geojsonLayer) { try { leafletMap.removeLayer(_geojsonLayer) } catch {}; _geojsonLayer = null }
     try { leafletMap.removeLayer(lineLayer) } catch {}
 
@@ -284,13 +291,14 @@ const onMapReady = async (maybeMap?: any) => {
     leafletMap.addLayer(lineLayer)
   }
 
-  watch([filteredGeojson, lineColor], () => {
+  _watchers.push(watch([filteredGeojson, lineColor], () => {
+    if (!_leafletMap) return
     for (const key of addedLine) {
       const m = markerPool.get(key)
       if (m && typeof m.setStyle === 'function') m.setStyle({ fillColor: lineColor.value })
     }
     redrawGeojson()
-  })
+  }))
 
   redrawGeojson()
   if (selectedLine.value) updateVisibleMarkers()
@@ -324,23 +332,26 @@ const onMapReady = async (maybeMap?: any) => {
   _onBusLocationEvent = onBusLocationEvent
   window.addEventListener('oukile:bus-location', onBusLocationEvent)
 
-  watch(selectedLine, (newLine) => {
+  _watchers.push(watch(selectedLine, (newLine) => {
+    if (!_leafletMap) return
     const allowed = newLine ? (attributions.value?.[newLine] ?? []) : []
     clearBusMarkersNotIn(allowed)
-  })
+  }))
 
-  watch(geojsonData, (val) => {
+  _watchers.push(watch(geojsonData, (val) => {
+    if (!_leafletMap) return
     if (!val) {
       try { unsubscribeAllBuses() } catch {}
       clearBusMarkersNotIn(followedBus.value ? [followedBus.value] : [])
     }
-  })
+  }))
 
-  watch([selectedLine, () => geojsonData.value !== null], ([line, hasGeojson]) => {
+  _watchers.push(watch([selectedLine, () => geojsonData.value !== null], ([line, hasGeojson]) => {
+    if (!_leafletMap) return
     if (!line || !hasGeojson) {
       try { unsubscribeAllBuses() } catch {}
     }
-  })
+  }))
 }
 </script>
 
