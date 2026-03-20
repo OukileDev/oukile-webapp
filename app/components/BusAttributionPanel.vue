@@ -6,7 +6,7 @@ defineProps<{
 
 <template>
   <div class="mt-2 bg-white/90 dark:bg-slate-800 rounded-xl shadow p-3">
-    <div class="text-xs font-medium mb-2">Bus attribués à la ligne (dans les deux sens)</div>
+    <div class="text-xs font-medium mb-2">Bus attribués à la ligne</div>
     <div class="flex gap-2 flex-wrap">
       <template v-if="busList.length">
         <span
