@@ -24,6 +24,8 @@ const {
 } = useLineFollow()
 
 const { followedBus, stopFollowing, unsubscribeAllBuses } = useSocket()
+const { selectStop, clearStop, isOpen: stopPanelOpen, selectedStopId, fitBoundsRequested } = useStopPanel()
+const { resetFollow } = useLineFollow()
 
 // ── Garde contre le double appel de onMapReady ────────────────────────────
 let mapInitialized = false
@@ -34,6 +36,7 @@ let _cluster: any = null
 let _lineLayer: any = null
 let _vehicleLayer: any = null
 let _geojsonLayer: any = null
+let _selectedStopLayer: any = null
 let _updateVisibleMarkers: (() => void) | null = null
 let _onBusLocationEvent: ((e: Event) => void) | null = null
 // Stop-handles des watchers créés dans onMapReady après un await.
@@ -49,9 +52,10 @@ function leafletCleanup() {
   try { _leafletMap?.removeLayer(_lineLayer) } catch {}
   try { _leafletMap?.removeLayer(_vehicleLayer) } catch {}
   try { if (_geojsonLayer) _leafletMap?.removeLayer(_geojsonLayer) } catch {}
+  try { if (_selectedStopLayer) _leafletMap?.removeLayer(_selectedStopLayer) } catch {}
   if (_onBusLocationEvent) window.removeEventListener('oukile:bus-location', _onBusLocationEvent)
   onRefreshMarkers.value = null
-  _leafletMap = _cluster = _lineLayer = _vehicleLayer = _geojsonLayer = null
+  _leafletMap = _cluster = _lineLayer = _vehicleLayer = _geojsonLayer = _selectedStopLayer = null
   _updateVisibleMarkers = _onBusLocationEvent = null
   mapInitialized = false
 }
@@ -149,36 +153,29 @@ const onMapReady = async (maybeMap?: any) => {
   }
 
   // ── Helpers markers bus ───────────────────────────────────────────────────
-  function addOrUpdateBusMarker(busID: string, lat: number, lng: number) {
+
+  function createBusIcon(color: string) {
+    const bg = /^#[0-9a-fA-F]{3,8}$/.test(color) ? color : '#3b82f6'
+    return L.divIcon({
+      html: `<div style="width:26px;height:26px;background:${bg};border:2.5px solid white;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.3)">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="white">
+          <path d="M17 20H7v1a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1H3V4c0-1.11.89-2 2-2h14c1.11 0 2 .89 2 2v16h-1v1a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1M5 6v6h14V6H5m2.5 9A1.5 1.5 0 0 1 9 16.5 1.5 1.5 0 0 1 7.5 18 1.5 1.5 0 0 1 6 16.5 1.5 1.5 0 0 1 7.5 15m9 0a1.5 1.5 0 0 1 1.5 1.5 1.5 1.5 0 0 1-1.5 1.5 1.5 1.5 0 0 1-1.5-1.5A1.5 1.5 0 0 1 16.5 15Z"/>
+        </svg>
+      </div>`,
+      className: '',
+      iconSize: [26, 26],
+      iconAnchor: [13, 13],
+    })
+  }
+
+  function addOrUpdateBusMarker(busID: string, lat: number, lng: number, color: string) {
     if (typeof lat !== 'number' || typeof lng !== 'number') return
     const existing = busMarkers.get(busID)
     if (existing) {
-      try {
-        existing.setLatLng([lat, lng])
-      } catch (e) { console.error('[oukile] update marker error', e) }
+      try { existing.setLatLng([lat, lng]) } catch (e) { console.error('[oukile] update marker error', e) }
     } else {
       try {
-        const m = L.marker([lat, lng], { riseOnHover: true })
-        m.bindPopup(`<strong>${busID}</strong>`)
-        m.on('click', async () => {
-          try {
-            const info = await $fetch<{ route: string | null; headsign: string | null; delay: number | null } | null>(
-              `/api/vehicles/${encodeURIComponent(busID)}`
-            )
-            const headsignLine = info?.headsign ? `<br/>↗ ${info.headsign}` : ''
-            let delayLine = ''
-            if (info?.delay != null) {
-              const absSec = Math.abs(info.delay)
-              const min = Math.floor(absSec / 60)
-              const sec = absSec % 60
-              const duration = min > 0 ? `${min} min${sec > 0 ? ` ${sec} s` : ''}` : `${sec} s`
-              if (info.delay > 10) delayLine = `<br/>🔴 En retard de ${duration}`
-              else if (info.delay < -10) delayLine = `<br/>🟢 En avance de ${duration}`
-              else delayLine = `<br/>🟢 À l'heure`
-            }
-            m.getPopup()?.setContent(`<strong>${busID}</strong>${headsignLine}${delayLine}`)
-          } catch {}
-        })
+        const m = L.marker([lat, lng], { icon: createBusIcon(color), riseOnHover: true, zIndexOffset: 1000 })
         vehicleLayer.addLayer(m)
         busMarkers.set(busID, m)
       } catch (e) { console.error('[oukile] create marker error', e) }
@@ -201,6 +198,43 @@ const onMapReady = async (maybeMap?: any) => {
   const added = new Set<string>()
   const addedLine = new Set<string>()
 
+  // ── Overlay "arrêt sélectionné" ───────────────────────────────────────────
+  // Un layer dédié au-dessus de tout : toujours un divIcon animé,
+  // quel que soit le type de marker sous-jacent (cluster ou circleMarker).
+  if (!document.getElementById('oukile-pulse')) {
+    const s = document.createElement('style')
+    s.id = 'oukile-pulse'
+    s.textContent = '@keyframes oukile-pulse{0%{transform:scale(0.9);opacity:0.8}100%{transform:scale(2.8);opacity:0}}'
+    document.head.appendChild(s)
+  }
+
+  _selectedStopLayer = L.layerGroup()
+  const selectedStopLayer = _selectedStopLayer
+  leafletMap.addLayer(selectedStopLayer)
+
+  function createSelectedIcon() {
+    return L.divIcon({
+      html: `<div style="position:relative;width:32px;height:32px">
+        <div style="position:absolute;inset:0;border-radius:50%;background:rgba(37,99,235,0.3);animation:oukile-pulse 1.5s ease-out infinite"></div>
+        <div style="position:absolute;inset:7px;border-radius:50%;background:#2563eb;border:2.5px solid white;box-shadow:0 2px 8px rgba(37,99,235,0.6)"></div>
+      </div>`,
+      className: '',
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+    })
+  }
+
+  function updateSelectedStopOverlay(stopId: string | null) {
+    selectedStopLayer.clearLayers()
+    if (!stopId) return
+    const loc = locations.value.find(l => l.id === stopId)
+    if (!loc) return
+    try {
+      L.marker([loc.lat, loc.lng], { icon: createSelectedIcon(), zIndexOffset: 2000 })
+        .addTo(selectedStopLayer)
+    } catch {}
+  }
+
   function createMarkerFor(loc: { id: string; name: string; lat: number; lng: number }, isLine = false) {
     const m = isLine
       ? L.circleMarker([loc.lat, loc.lng], {
@@ -211,10 +245,18 @@ const onMapReady = async (maybeMap?: any) => {
           fillOpacity: 1,
         })
       : L.marker([loc.lat, loc.lng])
-    m.bindPopup(`<strong>${loc.name}</strong>`)
+    m.on('click', (e: any) => {
+      L.DomEvent.stopPropagation(e)
+      selectStop(loc.id, loc.name)
+    })
     markerPool.set(loc.id, m)
     return m
   }
+
+  // Ferme le panneau et nettoie le tracé si on clique sur la carte
+  leafletMap.on('click', () => { clearStop(); resetFollow() })
+
+  _watchers.push(watch(selectedStopId, (id) => updateSelectedStopOverlay(id)))
 
   function clearLineMarkers() {
     for (const key of Array.from(addedLine)) {
@@ -231,6 +273,7 @@ const onMapReady = async (maybeMap?: any) => {
       const bounds = leafletMap.getBounds()
       const extended = bounds.pad(PRELOAD_PAD)
       const lineFilter = lineStopIds.value
+      const lineFilterSet = lineFilter !== null ? new Set(lineFilter) : null
 
       if (lineFilter === null && addedLine.size > 0) {
         clearLineMarkers()
@@ -248,17 +291,17 @@ const onMapReady = async (maybeMap?: any) => {
         }
 
         // Mode ligne : stops filtrés → lineLayer (sans cluster)
-        if (lineFilter !== null) {
+        if (lineFilterSet !== null) {
           if (added.has(key)) { safeRemoveFromCluster(markerPool.get(key)); added.delete(key) }
 
-          if (lineFilter.includes(key)) {
+          if (lineFilterSet.has(key)) {
             if (!addedLine.has(key)) {
               if (markerPool.has(key)) { safeRemoveFromCluster(markerPool.get(key)); markerPool.delete(key) }
               lineLayer.addLayer(createMarkerFor(loc, true))
               addedLine.add(key)
             }
           } else {
-            if (addedLine.has(key)) { safeRemoveFromLineLayer(markerPool.get(key)); addedLine.delete(key) }
+            if (addedLine.has(key)) { safeRemoveFromLineLayer(markerPool.get(key)); markerPool.delete(key); addedLine.delete(key) }
           }
           continue
         }
@@ -316,6 +359,7 @@ const onMapReady = async (maybeMap?: any) => {
       if (m && typeof m.setStyle === 'function') m.setStyle({ fillColor: lineColor.value })
     }
     redrawGeojson()
+    if (!filteredGeojson.value) updateVisibleMarkers()
   }))
 
   redrawGeojson()
@@ -337,10 +381,24 @@ const onMapReady = async (maybeMap?: any) => {
         if (!list.includes(busID)) return
       }
 
-      addOrUpdateBusMarker(busID, Number(lat), Number(lng))
+      addOrUpdateBusMarker(busID, Number(lat), Number(lng), lineColor.value)
 
       if (followedBus.value === busID) {
-        try { leafletMap.panTo([Number(lat), Number(lng)]) } catch {}
+        if (stopPanelOpen.value && fitBoundsRequested.value) {
+          // Premier fix : ajuster la vue pour voir à la fois l'arrêt et le bus
+          fitBoundsRequested.value = false
+          const stopLoc = locations.value.find(l => l.id === selectedStopId.value)
+          if (stopLoc) {
+            try {
+              leafletMap.fitBounds(
+                [[Number(lat), Number(lng)], [stopLoc.lat, stopLoc.lng]],
+                { padding: [50, 50], maxZoom: 16 }
+              )
+            } catch {}
+          }
+        } else if (!stopPanelOpen.value) {
+          try { leafletMap.panTo([Number(lat), Number(lng)]) } catch {}
+        }
       }
     } catch (err) {
       console.error('[oukile] onBusLocationEvent error', err)

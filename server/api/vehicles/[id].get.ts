@@ -5,7 +5,7 @@ export default defineEventHandler(async (event) => {
   if (!id) throw createError({ statusCode: 400, message: 'ID required' })
 
   try {
-    const raw = await getRedisClient().get(`vehicle:${id}`)
+    const raw = await getRedisClient().get(`gtfsrt:vehicle:${id}`)
     if (!raw) return null
     return JSON.parse(raw) as { route: string | null; headsign: string | null; delay: number | null; trip_id: string | null }
   } catch (e) {

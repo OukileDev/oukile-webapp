@@ -4,8 +4,14 @@ let client: Redis | null = null
 
 export function getRedisClient(): Redis {
   if (client) return client
-  const url = process.env.REDIS_URL || process.env.REDIS_URI || 'redis://127.0.0.1:6379'
-  client = new Redis(url)
+  const url = process.env.REDIS_URL || process.env.REDIS_URI
+  if (!url) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('[oukile] REDIS_URL is required in production')
+    }
+    console.warn('[oukile] REDIS_URL is not set, falling back to redis://127.0.0.1:6379')
+  }
+  client = new Redis(url || 'redis://127.0.0.1:6379')
   client.on('error', (err) => console.error('Redis error', err))
   return client
 }

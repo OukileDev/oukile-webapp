@@ -5,6 +5,10 @@ const paramsSchema = z.object({
   id: z.string().min(1).max(100).regex(/^[A-Za-z0-9_-]+$/, 'Invalid ID format')
 })
 
+const bodySchema = z.object({
+  headsign: z.string().max(200).optional()
+})
+
 export default defineEventHandler(async (event) => {
   const validation = paramsSchema.safeParse({ id: event.context.params?.id })
   if (!validation.success) {
@@ -12,11 +16,15 @@ export default defineEventHandler(async (event) => {
   }
   const { id } = validation.data
 
-  const rawHeadsign = getQuery(event).headsign
-  // Ensure we accept accents and other standard characters for headsigns in Redis keys
-  const headsign = typeof rawHeadsign === 'string' && rawHeadsign.length <= 200 
-    ? rawHeadsign.replace(/[^\p{L}\p{N} \-_]/gu, '') 
-    : undefined
+  const body = await readBody(event).catch(() => ({}))
+  const bodyValidation = bodySchema.safeParse(body || {})
+  
+  // Nettoyage basique (sans supprimer les points ou espaces qui sont valides comme St Doulchard par C. Commercial)
+  let headsign = bodyValidation.success ? bodyValidation.data.headsign : undefined
+  if (headsign) {
+    headsign = headsign.replace(/[\r\n]/g, '').trim()
+  }
+
   const redisKey = headsign ? `gtfsrt:attributions:${id}:${headsign}` : `gtfsrt:attributions:${id}`
 
   try {

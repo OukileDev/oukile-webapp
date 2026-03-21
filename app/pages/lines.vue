@@ -5,6 +5,11 @@ function goToLine(routeShortName: string | null) {
   if (!routeShortName) return
   navigateTo({ path: '/', query: { line: routeShortName } })
 }
+
+function getSecureColor(color: string | null | undefined, fallback: string) {
+  const hex = color || fallback
+  return /^[0-9A-Fa-f]{3,8}$/.test(hex) ? '#' + hex : '#' + fallback
+}
 </script>
 
 <template>
@@ -24,8 +29,8 @@ function goToLine(routeShortName: string | null) {
           <div
             class="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] text-lg font-bold shadow-sm"
             :style="{
-              backgroundColor: '#' + (line.route_color || 'ccc'),
-              color: '#' + (line.route_text_color || 'fff'),
+              backgroundColor: getSecureColor(line.route_color, 'ccc'),
+              color: getSecureColor(line.route_text_color, 'fff'),
             }"
           >
             {{ line.route_short_name }}

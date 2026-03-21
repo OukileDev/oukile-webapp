@@ -12,6 +12,8 @@ const {
   stopFollow,
 } = useLineFollow()
 
+const { panelView } = useStopPanel()
+
 // ── Chargement initial depuis la query ────────────────────────────────────
 const initialLine = route.query.line as string | undefined
 if (initialLine) {
@@ -73,8 +75,10 @@ if (import.meta.client) {
     <HomeMap />
   </div>
 
+  <StopDeparturesPanel />
+
   <LineFollowBar
-    v-if="followActive && selectedLine && currentDirection"
+    v-if="followActive && selectedLine && currentDirection && panelView !== 'line-stops'"
     :selected-line="selectedLine"
     :direction-label="displayDirectionLabel"
     :follow-bottom="followBottom"

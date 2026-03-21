@@ -1,3 +1,11 @@
+import { defineNuxtConfig } from 'nuxt/config'
+
+// En production, s'assurer que l'essentiel est défini
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.DATABASE_URL) console.warn('[oukile] DATABASE_URL is missing!')
+  if (!process.env.REDIS_URL) console.warn('[oukile] REDIS_URL is missing!')
+}
+
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
@@ -15,8 +23,12 @@ export default defineNuxtConfig({
   // Configuration de la vue d'ensemble
   runtimeConfig: {
     public: {
-      LOCATE_WS_URL: process.env.NUXT_PUBLIC_LOCATE_WS_URL || ''
+      LOCATE_WS_URL: process.env.NUXT_PUBLIC_LOCATE_WS_URL || '',
+      SHAPES_CDN_URL: process.env.NUXT_PUBLIC_SHAPES_CDN_URL || 'https://oukile.b-cdn.net/shapes'
     }
+  },
+  routeRules: {
+    '/api/**': { cors: true }
   },
   app: {
     head: {

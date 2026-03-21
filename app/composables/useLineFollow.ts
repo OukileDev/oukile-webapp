@@ -114,20 +114,74 @@ export function useLineFollow() {
   }
 
   async function fetchAndSubscribeAttributions(lineName: string, headsign?: string | null) {
-    const url = headsign
-      ? `/api/attributions/${encodeURIComponent(lineName)}?headsign=${encodeURIComponent(headsign)}`
-      : `/api/attributions/${encodeURIComponent(lineName)}`
-    const buses = (await $fetch<string[]>(url)) || []
+    const url = `/api/attributions/${encodeURIComponent(lineName)}`
+    const buses = (await $fetch<string[]>(url, {
+      method: 'POST',
+      body: headsign ? { headsign } : {}
+    }).catch(() => [])) || []
     attributions.value = { [lineName]: buses }
     unsubscribeAllBuses()
     await subscribeBusesForLine(buses)
   }
 
-  async function loadLineShape(lineName: string) {
+  /** Affiche le tracé + les arrêts sur la carte SANS activer le mode suivi
+   *  (pas de followActive, pas d'abonnement bus). Utilisé depuis le panneau d'arrêt. */
+  async function displayLineOnly(lineName: string, headsign?: string | null) {
+    const config = useRuntimeConfig()
     try {
       const [data, lineData] = await Promise.all([
         $fetch<GeoJSON.GeoJsonObject>(
-          `https://oukile.b-cdn.net/shapes/${lineName}.geojson`,
+          `${config.public.SHAPES_CDN_URL}/${lineName}.geojson`,
+          { responseType: 'json' }
+        ),
+        $fetch<LineData>(`/api/lines/${lineName}`).catch(() => null),
+      ])
+
+      lineColor.value = lineData?.route_color ? `#${lineData.route_color}` : '#2563eb'
+      lineStopsData.value = lineData ?? null
+      geojsonData.value = data
+      selectedLine.value = lineName
+      // followActive reste false → pas de LineFollowBar, pas de bus
+
+      const map: Record<string, GeoJSON.Feature[]> = {}
+      if ((data as any)?.type === 'FeatureCollection' && (data as any).features) {
+        for (const f of (data as any).features as GeoJSON.Feature[]) {
+          const p: any = (f as any).properties || {}
+          const key =
+            p.direction_id ?? p.direction ?? p.dir ?? p.trip_headsign ?? p.headsign ?? p.name ?? 'default'
+          if (!map[key]) map[key] = []
+          map[key].push(f)
+        }
+      } else {
+        map['default'] = [data as unknown as GeoJSON.Feature]
+      }
+
+      directionMap.value = map
+      directionKeys.value = Object.keys(map)
+
+      // Sélectionne la direction correspondant au headsign du départ cliqué
+      if (headsign && lineData) {
+        const idx = lineData.direction_name_1 === headsign ? 0
+          : lineData.direction_name_2 === headsign ? 1
+          : 0
+        currentDirection.value = directionKeys.value[idx] ?? directionKeys.value[0] ?? null
+      } else {
+        currentDirection.value = directionKeys.value[0] ?? null
+      }
+
+      applyLineStopFilter()
+    } catch (e) {
+      console.error('[oukile] impossible de charger le tracé GeoJSON :', e)
+      resetFollow()
+    }
+  }
+
+  async function loadLineShape(lineName: string) {
+    const config = useRuntimeConfig()
+    try {
+      const [data, lineData] = await Promise.all([
+        $fetch<GeoJSON.GeoJsonObject>(
+          `${config.public.SHAPES_CDN_URL}/${lineName}.geojson`,
           { responseType: 'json' }
         ),
         $fetch<LineData>(`/api/lines/${lineName}`).catch(() => null)
@@ -220,8 +274,10 @@ export function useLineFollow() {
     displayDirectionLabel,
     currentHeadsign,
     // actions
+    displayLineOnly,
     loadLineShape,
     reverseDirection,
+    resetFollow,
     stopFollow,
     applyLineStopFilter,
   }

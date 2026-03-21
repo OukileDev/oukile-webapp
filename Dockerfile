@@ -31,5 +31,8 @@ COPY --from=builder /app/.output ./.output
 # Exposer le port 3000 (Nuxt par défaut)
 EXPOSE 3000
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/', (r) => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"
+
 # Lancer le serveur Nuxt
 CMD ["node", ".output/server/index.mjs"]

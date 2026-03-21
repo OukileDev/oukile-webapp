@@ -29,7 +29,13 @@ export function useSocket() {
       return null
     }
 
-    socket = io(base, { transports: ['websocket'] })
+    socket = io(base, { 
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+    })
     socket.on('connect_error', (err) => console.error('[oukile] socket connect error', err))
     socket.on('connect', () => console.log('[oukile] socket connected', socket?.id))
     socket.on('disconnect', (reason) => console.log('[oukile] socket disconnected', reason))

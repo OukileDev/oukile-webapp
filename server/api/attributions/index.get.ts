@@ -1,9 +1,9 @@
-import { getRedisClient } from '../../utils/redis'
+import { getRedisClient, scanKeys } from '../../utils/redis'
 
 export default defineEventHandler(async () => {
   try {
     const redis = getRedisClient()
-    const keys = await redis.keys('attributions:*')
+    const keys = await scanKeys('gtfsrt:attributions:*')
     const result: Record<string, string[]> = {}
     if (!keys.length) return result
 
@@ -20,7 +20,7 @@ export default defineEventHandler(async () => {
       } catch {
         if (typeof raw === 'string') parsed = raw.split(',').map((s) => s.trim()).filter(Boolean)
       }
-      const line = key.split(':')[1] ?? key
+      const line = key.split(':')[2] ?? key
       result[line] = parsed
     }
 
