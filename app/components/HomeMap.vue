@@ -254,9 +254,32 @@ const onMapReady = async (maybeMap?: any) => {
   }
 
   // Ferme le panneau et nettoie le tracé si on clique sur la carte
-  leafletMap.on('click', () => { clearStop(); resetFollow() })
+  leafletMap.on('click', () => {
+    clearStop()
+    resetFollow()
+    navigateTo({ path: '/', query: {} }, { replace: true })
+  })
 
-  _watchers.push(watch(selectedStopId, (id) => updateSelectedStopOverlay(id)))
+  function panToStopAbovePanel(lat: number, lng: number) {
+    try {
+      const navEl = document.querySelector('.navbar') as HTMLElement | null
+      const navbarH = navEl
+        ? Math.max(0, window.innerHeight - navEl.getBoundingClientRect().top)
+        : 60
+      const mapSize = leafletMap.getSize()
+      const panelH = mapSize.y * 0.32
+      const visibleCenterY = (mapSize.y - navbarH - panelH) / 2
+      const currentY = leafletMap.latLngToContainerPoint([lat, lng]).y
+      leafletMap.panBy([0, currentY - visibleCenterY], { animate: true, duration: 0.3 })
+    } catch {}
+  }
+
+  _watchers.push(watch(selectedStopId, (id) => {
+    updateSelectedStopOverlay(id)
+    if (!id) return
+    const loc = locations.value.find(l => l.id === id)
+    if (loc) panToStopAbovePanel(loc.lat, loc.lng)
+  }))
 
   function clearLineMarkers() {
     for (const key of Array.from(addedLine)) {

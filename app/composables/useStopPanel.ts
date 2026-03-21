@@ -13,6 +13,7 @@ export type Departure = {
   vehicle: string | null
   localizable: boolean
   trip_id?: string
+  next_day?: boolean
 }
 
 export function useStopPanel() {

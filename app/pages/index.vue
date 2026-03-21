@@ -12,18 +12,24 @@ const {
   stopFollow,
 } = useLineFollow()
 
-const { panelView } = useStopPanel()
+const { panelView, isOpen: stopPanelOpen, clearStop } = useStopPanel()
 
 // ── Chargement initial depuis la query ────────────────────────────────────
 const initialLine = route.query.line as string | undefined
 if (initialLine) {
+  clearStop()
   await loadLineShape(initialLine)
+}
+
+function stopFollowAndClearUrl() {
+  stopFollow()
+  navigateTo({ path: '/', query: {} }, { replace: true })
 }
 
 watch(
   () => route.query.line,
   (newLine) => {
-    if (newLine) loadLineShape(newLine as string)
+    if (newLine) { clearStop(); loadLineShape(newLine as string) }
     else stopFollow()
   }
 )
@@ -78,12 +84,12 @@ if (import.meta.client) {
   <StopDeparturesPanel />
 
   <LineFollowBar
-    v-if="followActive && selectedLine && currentDirection && panelView !== 'line-stops'"
+    v-if="followActive && selectedLine && currentDirection && panelView !== 'line-stops' && !stopPanelOpen"
     :selected-line="selectedLine"
     :direction-label="displayDirectionLabel"
     :follow-bottom="followBottom"
     @reverse="reverseDirection"
-    @stop="stopFollow"
+    @stop="stopFollowAndClearUrl"
   >
     <BusAttributionPanel
       :bus-list="attributions[selectedLine] ?? []"

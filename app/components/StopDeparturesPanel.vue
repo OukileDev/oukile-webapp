@@ -123,6 +123,39 @@ if (import.meta.client) {
   })
 }
 
+// ── Filtre par ligne ─────────────────────────────────────────────────────
+const activeRoutes = ref<Set<string>>(new Set())
+
+// Réinitialise le filtre quand on change d'arrêt
+watch(selectedStopId, () => { activeRoutes.value = new Set() })
+
+const uniqueRoutes = computed(() => {
+  const seen = new Map<string, { route: string; color: string | null }>()
+  for (const dep of departures.value) {
+    if (!seen.has(dep.route)) seen.set(dep.route, { route: dep.route, color: dep.route_color })
+  }
+  return [...seen.values()].sort((a, b) => {
+    const na = parseInt(a.route), nb = parseInt(b.route)
+    if (!isNaN(na) && !isNaN(nb)) return na - nb
+    if (!isNaN(na)) return -1
+    if (!isNaN(nb)) return 1
+    return a.route.localeCompare(b.route)
+  })
+})
+
+const filteredDepartures = computed(() =>
+  activeRoutes.value.size === 0
+    ? departures.value
+    : departures.value.filter(d => activeRoutes.value.has(d.route))
+)
+
+function toggleRoute(route: string) {
+  const s = new Set(activeRoutes.value)
+  if (s.has(route)) s.delete(route)
+  else s.add(route)
+  activeRoutes.value = s
+}
+
 // ── Helpers d'affichage ───────────────────────────────────────────────────
 function formatDelay(seconds: number | null): { label: string; color: string } | null {
   if (seconds === null) return null
@@ -154,7 +187,7 @@ function routeBadgeStyle(color: string | null) {
     <div
       v-if="isOpen"
       class="fixed left-0 right-0 z-10050 flex flex-col"
-      :style="{ bottom: navbarBottom, maxHeight: panelView === 'line-stops' ? '32vh' : '70vh' }"
+      :style="{ bottom: navbarBottom, maxHeight: '32vh' }"
     >
       <!-- Bottom sheet -->
       <div class="mx-2 mb-2 overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-slate-900"
@@ -211,6 +244,35 @@ function routeBadgeStyle(color: string | null) {
         <!-- Body scrollable -->
         <div class="flex-1 overflow-y-auto overscroll-contain">
 
+          <!-- ── Filtre lignes (vue départs) ── -->
+          <div
+            v-if="panelView === 'departures' && !isLoading && uniqueRoutes.length > 1"
+            class="flex shrink-0 gap-1.5 overflow-x-auto border-b border-gray-100 px-3 py-2 dark:border-slate-700"
+            style="scrollbar-width: none;"
+          >
+            <button
+              v-if="activeRoutes.size > 0"
+              class="flex h-7 shrink-0 items-center gap-1 rounded-lg border border-gray-300 px-2.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:border-slate-600 dark:text-gray-300 dark:hover:bg-slate-700"
+              @click="activeRoutes = new Set()"
+            >
+              <Icon name="mi:close" class="h-3 w-3" />
+              Tout afficher
+            </button>
+            <button
+              v-for="r in uniqueRoutes"
+              :key="r.route"
+              class="flex h-7 shrink-0 items-center justify-center rounded-lg px-2.5 text-xs font-bold transition-opacity"
+              :style="routeBadgeStyle(r.color)"
+              :class="[
+                r.color ? '' : 'bg-gray-200 text-gray-700 dark:bg-slate-700 dark:text-gray-200',
+                activeRoutes.size > 0 && !activeRoutes.has(r.route) ? 'opacity-30' : 'opacity-100'
+              ]"
+              @click="toggleRoute(r.route)"
+            >
+              {{ r.route }}
+            </button>
+          </div>
+
           <!-- ── Vue départs ── -->
           <template v-if="panelView === 'departures'">
             <!-- Loading -->
@@ -222,14 +284,22 @@ function routeBadgeStyle(color: string | null) {
             </div>
 
             <!-- Empty -->
-            <div v-else-if="!departures.length" class="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+            <div v-else-if="!filteredDepartures.length" class="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
               Aucun départ à venir aujourd'hui
             </div>
 
             <!-- Liste -->
             <div v-else>
+              <!-- Bandeau "Demain" si tous les départs sont du lendemain -->
+              <div
+                v-if="filteredDepartures[0]?.next_day"
+                class="flex items-center gap-2 bg-amber-50 px-4 py-2 dark:bg-amber-950/30"
+              >
+                <Icon name="mi:clock" class="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                <span class="text-xs font-medium text-amber-700 dark:text-amber-400">Premiers départs demain</span>
+              </div>
               <button
-                v-for="(dep, i) in departures"
+                v-for="(dep, i) in filteredDepartures"
                 :key="i"
                 class="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50 active:bg-gray-100 dark:hover:bg-slate-800 dark:active:bg-slate-700"
                 :class="{ 'border-t border-gray-100 dark:border-slate-800': i > 0 }"
