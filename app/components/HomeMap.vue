@@ -399,7 +399,9 @@ const onMapReady = async (maybeMap?: any) => {
         if (followedBus.value !== busID) return
       }
 
-      if (selectedLine.value) {
+      // Si ce bus est le bus explicitement suivi (depuis panneau arrêt),
+      // on l'affiche toujours — attributions peut être vide dans ce mode.
+      if (selectedLine.value && followedBus.value !== busID) {
         const list = attributions.value?.[selectedLine.value] ?? []
         if (!list.includes(busID)) return
       }

@@ -113,13 +113,67 @@ function updateNavbarBottom() {
   }
 }
 
+// ── Position du bus sur la ligne ─────────────────────────────────────────
+const busLat = ref<number | null>(null)
+const busLng = ref<number | null>(null)
+
+const AT_STOP_THRESHOLD = 0.000225 // ≈ 25 m → "Bus à l'arrêt"
+
+// Index de l'arrêt où le bus est stationné (≤ 100 m)
+const busAtStopIdx = computed(() => {
+  if (busLat.value === null || busLng.value === null) return null
+  const stops = lineStops.value
+  const px = busLat.value, py = busLng.value
+  let closestIdx = -1, closestDist = Infinity
+  for (let i = 0; i < stops.length; i++) {
+    const d = Math.hypot(px - stops[i]!.stop_lat, py - stops[i]!.stop_lon)
+    if (d < closestDist) { closestDist = d; closestIdx = i }
+  }
+  return closestDist < AT_STOP_THRESHOLD ? closestIdx : null
+})
+
+// Index du segment (entre arrêt N et N+1) quand le bus n'est PAS à l'arrêt
+const busApproachingSegmentIdx = computed(() => {
+  if (busAtStopIdx.value !== null) return null // à l'arrêt, pas en approche
+  if (busLat.value === null || busLng.value === null) return null
+  const stops = lineStops.value
+  if (stops.length < 2) return null
+
+  const px = busLat.value, py = busLng.value
+
+  // Projection orthogonale sur chaque segment
+  let bestIdx = 0, bestDist = Infinity
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i]!, b = stops[i + 1]!
+    const dx = b.stop_lat - a.stop_lat, dy = b.stop_lon - a.stop_lon
+    const lenSq = dx * dx + dy * dy
+    const t = lenSq > 0 ? Math.max(0, Math.min(1, ((px - a.stop_lat) * dx + (py - a.stop_lon) * dy) / lenSq)) : 0
+    const dist = Math.hypot(px - (a.stop_lat + t * dx), py - (a.stop_lon + t * dy))
+    if (dist < bestDist) { bestDist = dist; bestIdx = i }
+  }
+  return bestIdx
+})
+
+function onBusLocation(evt: Event) {
+  const { lat, lng } = (evt as CustomEvent).detail
+  if (typeof lat === 'number' && !isNaN(lat) && typeof lng === 'number' && !isNaN(lng)) {
+    busLat.value = lat
+    busLng.value = lng
+  }
+}
+
+// Réinitialise la position quand on change de départ
+watch(selectedDeparture, () => { busLat.value = null; busLng.value = null })
+
 if (import.meta.client) {
   onMounted(() => {
     updateNavbarBottom()
     window.addEventListener('resize', updateNavbarBottom)
+    window.addEventListener('oukile:bus-location', onBusLocation)
   })
   onBeforeUnmount(() => {
     window.removeEventListener('resize', updateNavbarBottom)
+    window.removeEventListener('oukile:bus-location', onBusLocation)
   })
 }
 
@@ -389,66 +443,103 @@ function routeBadgeStyle(color: string | null) {
                 <Icon name="mi:chevron-up" class="h-3 w-3" />
               </button>
 
-              <div
+              <template
                 v-for="stop in visibleLineStops"
                 :key="stop.stop_id"
-                class="flex items-start gap-3"
               >
-                <!-- Ligne verticale + point -->
-                <div class="flex w-5 shrink-0 flex-col items-center">
-                  <!-- Segment haut -->
-                  <div
-                    class="w-0.5 flex-1"
-                    :class="stop.loopIdx === 0 ? 'invisible' : stop.absoluteIdx <= currentStopIndex ? 'bg-gray-300 dark:bg-slate-600' : ''"
-                    :style="stop.absoluteIdx > currentStopIndex && stop.loopIdx !== 0 ? { backgroundColor: lineColor } : {}"
-                    style="min-height: 12px;"
-                  />
-                  <!-- Point -->
-                  <div
-                    class="z-10 rounded-full border-2"
-                    :class="[
-                      stop.absoluteIdx === currentStopIndex
-                        ? 'h-4 w-4 shadow-md'
-                        : stop.absoluteIdx < currentStopIndex
-                          ? 'h-2.5 w-2.5 border-gray-300 bg-gray-300 dark:border-slate-600 dark:bg-slate-600'
-                          : 'h-3 w-3'
-                    ]"
-                    :style="stop.absoluteIdx >= currentStopIndex
-                      ? { backgroundColor: lineColor, borderColor: stop.absoluteIdx === currentStopIndex ? lineColor : 'white' }
-                      : {}"
-                  />
-                  <!-- Segment bas -->
-                  <div
-                    class="w-0.5 flex-1"
-                    :class="stop.loopIdx === visibleLineStops.length - 1 ? 'invisible' : stop.absoluteIdx < currentStopIndex ? 'bg-gray-300 dark:bg-slate-600' : ''"
-                    :style="stop.absoluteIdx >= currentStopIndex && stop.loopIdx !== visibleLineStops.length - 1 ? { backgroundColor: lineColor } : {}"
-                    style="min-height: 12px;"
-                  />
+                <!-- Arrêt -->
+                <div class="flex items-center gap-3">
+                  <!-- Ligne verticale + point -->
+                  <div class="flex w-5 shrink-0 flex-col items-center">
+                    <!-- Segment haut -->
+                    <div
+                      class="w-0.5 flex-1"
+                      :class="stop.loopIdx === 0 ? 'invisible' : stop.absoluteIdx <= currentStopIndex ? 'bg-gray-300 dark:bg-slate-600' : ''"
+                      :style="stop.absoluteIdx > currentStopIndex && stop.loopIdx !== 0 ? { backgroundColor: lineColor } : {}"
+                      style="min-height: 12px;"
+                    />
+                    <!-- Point -->
+                    <div
+                      v-if="busAtStopIdx !== stop.absoluteIdx"
+                      class="z-10 rounded-full border-2"
+                      :class="[
+                        stop.absoluteIdx === currentStopIndex
+                          ? 'h-4 w-4 shadow-md'
+                          : stop.absoluteIdx < currentStopIndex
+                            ? 'h-2.5 w-2.5 border-gray-300 bg-gray-300 dark:border-slate-600 dark:bg-slate-600'
+                            : 'h-3 w-3'
+                      ]"
+                      :style="stop.absoluteIdx >= currentStopIndex
+                        ? { backgroundColor: lineColor, borderColor: stop.absoluteIdx === currentStopIndex ? lineColor : 'white' }
+                        : {}"
+                    />
+                    <!-- Bus à l'arrêt : icône bus sur le point -->
+                    <div
+                      v-else
+                      class="z-10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 bg-white shadow-md dark:bg-slate-900"
+                      :style="{ borderColor: lineColor }"
+                    >
+                      <svg viewBox="0 0 24 24" class="h-3 w-3" :style="{ fill: lineColor }">
+                        <path d="M4 16c0 .88.39 1.67 1 2.22V20c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h8v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4s-8 .5-8 4v10zm3.5 1c-.83 0-1.5-.67-1.5-1.5S6.67 14 7.5 14s1.5.67 1.5 1.5S8.33 17 7.5 17zm9 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm1.5-6H6V6h12v5z"/>
+                      </svg>
+                    </div>
+                    <!-- Segment bas -->
+                    <div
+                      class="w-0.5 flex-1"
+                      :class="stop.loopIdx === visibleLineStops.length - 1 ? 'invisible' : stop.absoluteIdx < currentStopIndex ? 'bg-gray-300 dark:bg-slate-600' : ''"
+                      :style="stop.absoluteIdx >= currentStopIndex && stop.loopIdx !== visibleLineStops.length - 1 ? { backgroundColor: lineColor } : {}"
+                      style="min-height: 12px;"
+                    />
+                  </div>
+
+                  <!-- Nom de l'arrêt -->
+                  <div class="flex flex-1 items-center gap-2 py-0.5">
+                    <span
+                      class="text-sm leading-5"
+                      :class="[
+                        busAtStopIdx === stop.absoluteIdx
+                          ? 'font-bold'
+                          : stop.absoluteIdx === currentStopIndex
+                            ? 'font-bold text-gray-900 dark:text-white'
+                            : stop.absoluteIdx < currentStopIndex
+                              ? 'text-gray-400 dark:text-slate-500'
+                              : 'text-gray-700 dark:text-gray-200'
+                      ]"
+                      :style="busAtStopIdx === stop.absoluteIdx ? { color: lineColor } : {}"
+                    >
+                      {{ stop.stop_name }}
+                    </span>
+                    <span
+                      v-if="stop.absoluteIdx === currentStopIndex"
+                      class="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                      :style="{ backgroundColor: lineColor }"
+                    >
+                      Vous êtes ici
+                    </span>
+                  </div>
                 </div>
 
-                <!-- Nom de l'arrêt -->
-                <div class="flex flex-1 items-center gap-2 py-0.5">
-                  <span
-                    class="text-sm leading-5"
-                    :class="[
-                      stop.absoluteIdx === currentStopIndex
-                        ? 'font-bold text-gray-900 dark:text-white'
-                        : stop.absoluteIdx < currentStopIndex
-                          ? 'text-gray-400 dark:text-slate-500'
-                          : 'text-gray-700 dark:text-gray-200'
-                    ]"
-                  >
-                    {{ stop.stop_name }}
-                  </span>
-                  <span
-                    v-if="stop.absoluteIdx === currentStopIndex"
-                    class="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white"
-                    :style="{ backgroundColor: lineColor }"
-                  >
-                    Vous êtes ici
-                  </span>
+                <!-- Indicateur position du bus (entre cet arrêt et le suivant) -->
+                <div
+                  v-if="busApproachingSegmentIdx !== null && busApproachingSegmentIdx === stop.absoluteIdx && stop.loopIdx !== visibleLineStops.length - 1"
+                  class="flex items-center gap-3"
+                >
+                  <div class="flex w-5 shrink-0 flex-col items-center">
+                    <div class="h-2 w-0.5" :style="{ backgroundColor: lineColor }" />
+                    <!-- Icône bus -->
+                    <div
+                      class="z-10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 bg-white shadow-md dark:bg-slate-900"
+                      :style="{ borderColor: lineColor }"
+                    >
+                      <svg viewBox="0 0 24 24" class="h-3 w-3" :style="{ fill: lineColor }">
+                        <path d="M4 16c0 .88.39 1.67 1 2.22V20c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h8v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4s-8 .5-8 4v10zm3.5 1c-.83 0-1.5-.67-1.5-1.5S6.67 14 7.5 14s1.5.67 1.5 1.5S8.33 17 7.5 17zm9 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm1.5-6H6V6h12v5z"/>
+                      </svg>
+                    </div>
+                    <div class="h-2 w-0.5" :style="{ backgroundColor: lineColor }" />
+                  </div>
+                  <span class="text-xs font-medium" :style="{ color: lineColor }">Bus en approche</span>
                 </div>
-              </div>
+              </template>
             </div>
           </template>
         </div>
