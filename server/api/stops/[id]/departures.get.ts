@@ -7,7 +7,8 @@ const paramsSchema = z.object({
 })
 
 interface RtTrip {
-  vehicle: string
+  trip_id: string
+  vehicle: string | null
   route: string
   headsign: string
   delay: number | null
@@ -22,7 +23,10 @@ export default defineEventHandler(async (event) => {
   const now = new Date()
   const secondsFromMidnight = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()
 
-  const rows = await prisma.$queryRaw<Array<{
+  // Buffer de 30 min pour inclure les trips retardés dont l'heure théorique est passée
+  const DELAY_BUFFER_S = 1800
+
+  const rawRows = await prisma.$queryRaw<Array<{
     crossing_time_text: string
     crossing_time_seconds: number
     trip_id: string
@@ -44,20 +48,27 @@ export default defineEventHandler(async (event) => {
     WHERE st.stop_id = ${stopId}
       AND cd.date = CURRENT_DATE
       AND cd.exception_type = 1
-      AND st.crossing_time_seconds > ${secondsFromMidnight}
+      AND st.crossing_time_seconds > ${secondsFromMidnight - DELAY_BUFFER_S}
     ORDER BY st.crossing_time_seconds ASC
-    LIMIT 20
+    LIMIT 25
   `
 
   const rtRaw = await getRedisClient().get(`gtfsrt:stop:${stopId}`).catch(() => null)
   const rtEntries: RtTrip[] = rtRaw ? JSON.parse(rtRaw) : []
 
-  // Index par route|headsign → premier match
+  // Index par trip_id — matching exact, évite de confondre deux services différents
+  // de la même ligne/direction sur des plages horaires distinctes.
   const rtIndex = new Map<string, RtTrip>()
   for (const rt of rtEntries) {
-    const key = `${rt.route}|${rt.headsign}`
-    if (!rtIndex.has(key)) rtIndex.set(key, rt)
+    if (rt.trip_id && !rtIndex.has(rt.trip_id)) rtIndex.set(rt.trip_id, rt)
   }
+
+  // Post-filtre : ne garder que les trips dont l'heure estimée (théorique + retard) est encore à venir.
+  // Cela évite de masquer un trip retardé dont l'heure théorique est légèrement passée.
+  const rows = rawRows.filter(row => {
+    const rt = rtIndex.get(row.trip_id)
+    return row.crossing_time_seconds + (rt?.delay ?? 0) >= secondsFromMidnight
+  })
 
   // Si aucun départ aujourd'hui, on charge les premiers trajets de demain
   let nextDayRows: typeof rows = []
@@ -82,8 +93,11 @@ export default defineEventHandler(async (event) => {
     `
   }
 
+  // Un véhicule ne doit apparaître que sur le voyage le plus proche où il est actif.
+  const usedVehicles = new Set<string>()
+
   function mapRow(row: typeof rows[number], next_day: boolean) {
-    const rt = rtIndex.get(`${row.route_short_name}|${row.trip_headsign}`)
+    const rt = rtIndex.get(row.trip_id)
     const delaySec = next_day ? null : (rt?.delay ?? null)
 
     let estimatedTime: string | null = null
@@ -94,6 +108,12 @@ export default defineEventHandler(async (event) => {
       estimatedTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
     }
 
+    let vehicle: string | null = null
+    if (!next_day && rt?.vehicle && !usedVehicles.has(rt.vehicle)) {
+      vehicle = rt.vehicle
+      usedVehicles.add(rt.vehicle)
+    }
+
     return {
       theoretical_time: row.crossing_time_text?.slice(0, 5) ?? null,
       estimated_time: estimatedTime,
@@ -101,8 +121,8 @@ export default defineEventHandler(async (event) => {
       route: row.route_short_name ?? '',
       headsign: row.trip_headsign ?? '',
       route_color: row.route_color ? `#${row.route_color}` : null,
-      vehicle: next_day ? null : (rt?.vehicle ?? null),
-      localizable: next_day ? false : !!rt?.vehicle,
+      vehicle,
+      localizable: !!vehicle,
       next_day,
     }
   }

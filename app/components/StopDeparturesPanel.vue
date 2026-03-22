@@ -142,15 +142,18 @@ const busApproachingSegmentIdx = computed(() => {
   const px = busLat.value, py = busLng.value
 
   // Projection orthogonale sur chaque segment
-  let bestIdx = 0, bestDist = Infinity
+  let bestIdx = 0, bestDist = Infinity, bestRawT = 0
   for (let i = 0; i < stops.length - 1; i++) {
     const a = stops[i]!, b = stops[i + 1]!
     const dx = b.stop_lat - a.stop_lat, dy = b.stop_lon - a.stop_lon
     const lenSq = dx * dx + dy * dy
-    const t = lenSq > 0 ? Math.max(0, Math.min(1, ((px - a.stop_lat) * dx + (py - a.stop_lon) * dy) / lenSq)) : 0
+    const rawT = lenSq > 0 ? ((px - a.stop_lat) * dx + (py - a.stop_lon) * dy) / lenSq : 0
+    const t = Math.max(0, Math.min(1, rawT))
     const dist = Math.hypot(px - (a.stop_lat + t * dx), py - (a.stop_lon + t * dy))
-    if (dist < bestDist) { bestDist = dist; bestIdx = i }
+    if (dist < bestDist) { bestDist = dist; bestIdx = i; bestRawT = rawT }
   }
+  // Bus avant le premier arrêt : projection négative sur le premier segment
+  if (bestIdx === 0 && bestRawT < 0) return null
   return bestIdx
 })
 
