@@ -21,7 +21,7 @@ const {
   resetFollow,
 } = useLineFollow()
 
-const { followBus } = useSocket()
+const { followBus, followedBus, socketStatus } = useSocket()
 
 // ── Chargement de la ligne quand on entre dans la vue "arrêts" ────────────
 const loadingLine = ref(false)
@@ -182,9 +182,13 @@ if (import.meta.client) {
 
 // ── Filtre par ligne ─────────────────────────────────────────────────────
 const activeRoutes = ref<Set<string>>(new Set())
+const showPastDepartures = ref(false)
 
 // Réinitialise le filtre quand on change d'arrêt
-watch(selectedStopId, () => { activeRoutes.value = new Set() })
+watch(selectedStopId, () => {
+  activeRoutes.value = new Set()
+  showPastDepartures.value = false
+})
 
 const uniqueRoutes = computed(() => {
   const seen = new Map<string, { route: string; color: string | null }>()
@@ -205,6 +209,20 @@ const filteredDepartures = computed(() =>
     ? departures.value
     : departures.value.filter(d => activeRoutes.value.has(d.route))
 )
+
+// Un départ est considéré passé si son heure effective (estimée si dispo, sinon théorique)
+// est antérieure à l'heure actuelle — les bus en retard mais pas encore passés restent visibles.
+function isPast(dep: Departure): boolean {
+  if (dep.next_day) return false
+  const timeStr = dep.estimated_time ?? dep.theoretical_time
+  if (!timeStr) return false
+  const [h, m] = timeStr.split(':').map(Number)
+  const now = new Date()
+  return (h! * 60 + m!) < (now.getHours() * 60 + now.getMinutes())
+}
+
+const pastDepartures = computed(() => filteredDepartures.value.filter(isPast))
+const upcomingDepartures = computed(() => filteredDepartures.value.filter(d => !isPast(d)))
 
 function toggleRoute(route: string) {
   const s = new Set(activeRoutes.value)
@@ -355,9 +373,45 @@ function routeBadgeStyle(color: string | null) {
                 <Icon name="mi:clock" class="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
                 <span class="text-xs font-medium text-amber-700 dark:text-amber-400">Premiers départs demain</span>
               </div>
+
+              <!-- Trajets passés (repliés par défaut) -->
+              <template v-if="pastDepartures.length > 0">
+                <button
+                  v-if="!showPastDepartures"
+                  class="flex w-full items-center gap-2 border-b border-gray-100 px-4 py-2.5 text-xs text-gray-400 hover:bg-gray-50 dark:border-slate-700 dark:text-slate-500 dark:hover:bg-slate-800"
+                  @click="showPastDepartures = true"
+                >
+                  <Icon name="mi:chevron-up" class="h-3.5 w-3.5" />
+                  Voir {{ pastDepartures.length }} trajet{{ pastDepartures.length > 1 ? 's' : '' }} précédent{{ pastDepartures.length > 1 ? 's' : '' }}
+                </button>
+                <template v-else>
+                  <button
+                    v-for="(dep, i) in pastDepartures"
+                    :key="`past-${i}`"
+                    class="flex w-full items-center gap-3 px-4 py-3 text-left opacity-50 transition-colors hover:bg-gray-50 active:bg-gray-100 dark:hover:bg-slate-800 dark:active:bg-slate-700"
+                    :class="{ 'border-t border-gray-100 dark:border-slate-800': i > 0 }"
+                    @click="handleDepartureClick(dep)"
+                  >
+                    <span
+                      class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-bold shadow-sm"
+                      :style="routeBadgeStyle(dep.route_color)"
+                      :class="dep.route_color ? '' : 'bg-gray-200 text-gray-700 dark:bg-slate-700 dark:text-gray-200'"
+                    >
+                      {{ dep.route }}
+                    </span>
+                    <div class="flex min-w-0 flex-1 flex-col">
+                      <span class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ dep.headsign }}</span>
+                      <span class="text-xs text-gray-500 dark:text-gray-400">{{ dep.estimated_time ?? dep.theoretical_time }}</span>
+                    </div>
+                    <Icon name="mi:chevron-right" class="h-4 w-4 shrink-0 text-gray-400" />
+                  </button>
+                  <div class="border-b border-gray-100 dark:border-slate-700" />
+                </template>
+              </template>
+
               <button
-                v-for="(dep, i) in filteredDepartures"
-                :key="i"
+                v-for="(dep, i) in upcomingDepartures"
+                :key="`upcoming-${i}`"
                 class="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50 active:bg-gray-100 dark:hover:bg-slate-800 dark:active:bg-slate-700"
                 :class="{ 'border-t border-gray-100 dark:border-slate-800': i > 0 }"
                 @click="handleDepartureClick(dep)"
@@ -404,12 +458,15 @@ function routeBadgeStyle(color: string | null) {
                 </div>
 
                 <!-- Indicateur RT + flèche -->
-                <div class="flex shrink-0 flex-col items-center gap-1">
+                <div class="flex shrink-0 flex-col items-center gap-2.5">
                   <span
                     v-if="dep.localizable"
-                    class="h-2 w-2 rounded-full bg-green-400"
+                    class="relative flex h-2 w-2"
                     title="Position en temps réel disponible"
-                  />
+                  >
+                    <span class="absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75 rt-ping" />
+                    <span class="relative inline-flex h-2 w-2 rounded-full bg-green-400" />
+                  </span>
                   <Icon name="mi:chevron-right" class="h-4 w-4 text-gray-400" />
                 </div>
               </button>
@@ -418,6 +475,24 @@ function routeBadgeStyle(color: string | null) {
 
           <!-- ── Vue arrêts de la ligne ── -->
           <template v-else-if="panelView === 'line-stops'">
+            <div
+              v-if="followedBus && socketStatus === 'reconnecting'"
+              class="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 dark:border-amber-800/50 dark:bg-amber-950/40"
+            >
+              <svg class="h-3.5 w-3.5 shrink-0 animate-spin text-amber-600 dark:text-amber-400" viewBox="0 0 24 24" fill="none">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.37 0 0 5.37 0 12h4z"/>
+              </svg>
+              <span class="text-xs font-medium text-amber-700 dark:text-amber-400">Reconnexion en cours…</span>
+            </div>
+            <div
+              v-else-if="followedBus && socketStatus === 'disconnected'"
+              class="flex items-center gap-2 border-b border-red-200 bg-red-50 px-4 py-2 dark:border-red-800/50 dark:bg-red-950/40"
+            >
+              <span class="h-2 w-2 shrink-0 rounded-full bg-red-400" />
+              <span class="text-xs font-medium text-red-600 dark:text-red-400">Position en temps réel indisponible</span>
+            </div>
+
             <div v-if="loadingLine" class="flex items-center justify-center py-10">
               <svg class="h-6 w-6 animate-spin text-blue-500" viewBox="0 0 24 24" fill="none">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
@@ -550,3 +625,10 @@ function routeBadgeStyle(color: string | null) {
     </div>
   </Transition>
 </template>
+
+<style scoped>
+@keyframes rt-ping {
+  75%, 100% { transform: scale(2.2); opacity: 0; }
+}
+.rt-ping { animation: rt-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite; }
+</style>

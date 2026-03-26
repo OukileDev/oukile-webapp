@@ -14,6 +14,17 @@ let subscribeGeneration = 0
 export function useSocket() {
   const runtimeConfig = useRuntimeConfig()
   const followedBus = useState<string | null>('followedBus', () => null)
+  const socketStatus = useState<'connected' | 'reconnecting' | 'disconnected'>('socketStatus', () => 'disconnected')
+
+  function rejoinAllRooms() {
+    if (!socket) return
+    for (const bus of joinedRooms) {
+      socket.emit('join', `bus:${bus}`)
+      socket.emit('join_bus', bus)
+      socket.emit('subscribe', `bus:${bus}`)
+      socket.emit('subscribe_bus', bus)
+    }
+  }
 
   async function ensureSocket(): Promise<Socket | null> {
     if (socket) return socket
@@ -29,7 +40,7 @@ export function useSocket() {
       return null
     }
 
-    socket = io(base, { 
+    socket = io(base, {
       transports: ['websocket'],
       reconnection: true,
       reconnectionAttempts: 10,
@@ -37,8 +48,21 @@ export function useSocket() {
       reconnectionDelayMax: 5000,
     })
     socket.on('connect_error', (err) => console.error('[oukile] socket connect error', err))
-    socket.on('connect', () => console.log('[oukile] socket connected', socket?.id))
-    socket.on('disconnect', (reason) => console.log('[oukile] socket disconnected', reason))
+    socket.on('connect', () => {
+      console.log('[oukile] socket connected', socket?.id)
+      socketStatus.value = 'connected'
+      // Re-join toutes les rooms après reconnexion (connect se déclenche aussi après un reconnect)
+      rejoinAllRooms()
+    })
+    socket.on('disconnect', (reason) => {
+      console.log('[oukile] socket disconnected', reason)
+      // Ne pas passer en reconnecting si c'est une déconnexion volontaire
+      if (reason !== 'io client disconnect') socketStatus.value = 'reconnecting'
+    })
+    socket.on('reconnect_failed', () => {
+      console.warn('[oukile] socket reconnect failed — giving up')
+      socketStatus.value = 'disconnected'
+    })
 
     // Handler générique : normalise et dispatche un CustomEvent window
     if (!(socket as any).__oukile_listener_attached) {
@@ -93,6 +117,7 @@ export function useSocket() {
       joinedRooms.delete(followedBus.value)
     }
     followedBus.value = null
+    socketStatus.value = socket?.connected ? 'connected' : 'disconnected'
   }
 
   async function subscribeBusesForLine(busList: string[]) {
@@ -130,10 +155,12 @@ export function useSocket() {
   function disconnectSocket() {
     try { socket?.disconnect() } catch {}
     socket = null
+    socketStatus.value = 'disconnected'
   }
 
   return {
     followedBus,
+    socketStatus,
     followBus,
     stopFollowing,
     subscribeBusesForLine,
